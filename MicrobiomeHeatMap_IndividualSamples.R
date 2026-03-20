@@ -172,13 +172,24 @@ tab <- tab[, sample_order, drop = FALSE]
 tab <- tab[sort(rownames(tab)), , drop = FALSE]
 
 # =========================
-# 7. Column annotation
+# 7. Column annotation and colors
 # =========================
 
 annotation_col <- data.frame(
   Group = meta$group[match(colnames(tab), meta$`sample-id`)],
   row.names = colnames(tab),
   check.names = FALSE
+)
+
+annotation_colors <- list(
+  Group = c(
+    "PTSD-EGGS" = "#FFAB5C",
+    "PTSD-SILK" = "#8DA3FC",
+    "PTSD-ENV"  = "#5FFC6F",
+    "PRD-EGGS"  = "#E66F00",
+    "PRD-SILK"  = "#345DFA",
+    "PRD-ENV"   = "#026B0C"
+  )
 )
 
 # =========================
@@ -205,6 +216,7 @@ pheatmap(
   cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
   fontsize_row = 8,
   fontsize_col = 8,
   cellwidth = 18,
@@ -230,6 +242,7 @@ pheatmap(
   cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
   fontsize_row = 8,
   fontsize_col = 8,
   cellwidth = 18,
@@ -256,6 +269,7 @@ pheatmap(
   cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
   fontsize_row = 8,
   fontsize_col = 8,
   cellwidth = 18,
@@ -266,6 +280,4 @@ pheatmap(
 )
 
 dev.off()
-
-
 
