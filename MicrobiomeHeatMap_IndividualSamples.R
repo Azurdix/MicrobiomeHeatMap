@@ -1,133 +1,238 @@
 # =============================================================================================
+# Title: Microbiome Heatmap - Top 30 Families Relative Abundance (Per-Sample Visualization)
 # Author: Mateusz Glenszczyk
 # Email: mateusz.glenszczyk@gmail.com
 # Date: 2026-04-01
-# Description: Microbiome Heatmap - Top 30 Families Relative Abundance Visualization
+# Project: PhD project - spider-associated microbiome comparison
 # =============================================================================================
 #
-# **Purpose:**
-# Generates a log-transformed heatmap of the top 30 bacterial families' relative abundance across samples.
-# Part of a PhD project comparing microbiome composition across multiple samples.
-# It visualizes patterns and clusters in microbiome composition for comparative analysis.
-# My sample included two species (Parasteatoda vs Pardosa) + three spider egg sac conditions (Environment + Silk + Eggs).
+# Description:
+# This script generates a log-transformed heatmap of the top 30 bacterial families based on
+# relative abundance data for individual samples. Unlike the aggregated version, each column
+# in the heatmap represents a single sample rather than a grouped mean profile.
 #
-# **Inputs:**
-# - `top30_family_relative_short_clean.tsv`: Pre-filtered relative abundance table (top 30 families).
-# - `metadata_plik.tsv`: Sample metadata with group assignments (used for column annotation).
+# Final figure settings:
+# - bacterial families (rows) are sorted alphabetically
+# - samples (columns) are displayed in fixed biological group order:
+#     PTSD-EGGS, PTSD-SILK, PTSD-ENV, PRD-EGGS, PRD-SILK, PRD-ENV
+# - samples within each group are sorted alphabetically by sample ID
 #
-# **Key Steps:**
-# - Log10-transforms relative abundance data for better contrast.
-# - Annotates columns by experimental group using metadata.
-# - Generates interactive and high-resolution heatmaps (PNG/PDF).
+# Group labels:
+# - PTSD = Parasteatoda
+# - PRD  = Pardosa
 #
-# **Outputs:**
-# - `top30_family_heatmap-color.png`: High-resolution heatmap image.
-# - `top30_family_heatmap-color.pdf`: Vector-format heatmap for publications.
+# Metadata requirements:
+# - sample-id
+# - class
+# - and either:
+#     * species
+#   or
+#     * label
 #
-# **Dependencies:**
+# Expected condition labels:
+# - eggs / silk / env
+#   (the script also accepts variants such as "environment")
+#
+# Input files:
+# - 06_Exports/family_per_sample_export/top30_family_relative_short_clean.tsv
+# - 01_Metadata/metadata_plik.tsv
+#
+# Output files:
+# - 06_Exports/family_per_sample_export/top30_family_heatmap-color.png
+# - 06_Exports/family_per_sample_export/top30_family_heatmap-color.pdf
+#
+# Dependencies:
 # - R (>= 4.0.0)
-# - Packages: `pheatmap`
+# - pheatmap
 #
-# **Notes:**
+# Notes:
 # - NA values are replaced with 0 before log-transformation.
-# - Symmetric color breaks ensure balanced visualization of up-/down-regulated taxa.
-# - For troubleshooting: PDF output is guaranteed; PNG may fail on some systems.
+# - Symmetric color breaks are used for balanced visualization.
+# - Row clustering is disabled to preserve alphabetical family order.
+# - Column clustering is disabled to preserve predefined sample order.
 # =============================================================================================
 
-
-
-#This to clean environment
+# Clean environment
 rm(list = ls())
 
-#This, so you can even do a heatmap
+# Load package
 library(pheatmap)
 
-# Read Family Table
+# =========================
+# 1. Read input files
+# =========================
+
 tab <- read.table(
   "06_Exports/family_per_sample_export/top30_family_relative_short_clean.tsv",
   header = TRUE,
   sep = "\t",
   row.names = 1,
-  check.names = FALSE
+  check.names = FALSE,
+  stringsAsFactors = FALSE
 )
 
-# Read Metadata
 meta <- read.table(
   "01_Metadata/metadata_plik.tsv",
   header = TRUE,
   sep = "\t",
-  stringsAsFactors = FALSE,
-  check.names = FALSE
+  check.names = FALSE,
+  stringsAsFactors = FALSE
 )
 
-# Columns to Numeric
+# =========================
+# 2. Prepare abundance table
+# =========================
+
 tab <- as.data.frame(
   lapply(tab, as.numeric),
   row.names = rownames(tab),
   check.names = FALSE
 )
 
-# Sample Order
-meta <- meta[order(meta$class, meta$label), ]
+# Keep only shared samples
+meta <- meta[meta$`sample-id` %in% colnames(tab), , drop = FALSE]
+tab  <- tab[, meta$`sample-id`, drop = FALSE]
+
+# Replace NA with 0
+tab[is.na(tab)] <- 0
+
+# Remove taxa absent across all samples
+tab <- tab[rowSums(tab) > 0, , drop = FALSE]
+
+# =========================
+# 3. Detect metadata fields
+# =========================
+
+if ("species" %in% colnames(meta)) {
+  species_raw <- meta$species
+} else if ("label" %in% colnames(meta)) {
+  species_raw <- meta$label
+} else {
+  stop("Metadata must contain either a 'species' column or a 'label' column.")
+}
+
+if (!"class" %in% colnames(meta)) {
+  stop("Metadata must contain a 'class' column.")
+}
+
+class_raw <- meta$class
+
+species_clean <- trimws(tolower(species_raw))
+class_clean   <- trimws(tolower(class_raw))
+
+# =========================
+# 4. Build sample group labels
+# =========================
+
+species_code <- ifelse(
+  grepl("parasteatoda", species_clean), "PTSD",
+  ifelse(grepl("pardosa", species_clean), "PRD", NA)
+)
+
+class_code <- ifelse(
+  grepl("egg", class_clean), "EGGS",
+  ifelse(grepl("silk", class_clean), "SILK",
+         ifelse(grepl("env|environment", class_clean), "ENV", NA))
+)
+
+meta$group <- paste(species_code, class_code, sep = "-")
+
+# Remove unmapped rows
+meta <- meta[!is.na(species_code) & !is.na(class_code), , drop = FALSE]
+tab  <- tab[, meta$`sample-id`, drop = FALSE]
+
+# =========================
+# 5. Define fixed group order and sample order
+# =========================
+
+desired_order <- c(
+  "PTSD-EGGS",
+  "PTSD-SILK",
+  "PTSD-ENV",
+  "PRD-EGGS",
+  "PRD-SILK",
+  "PRD-ENV"
+)
+
+meta$group <- factor(meta$group, levels = desired_order)
+
+# Sort by biological group first, then alphabetically by sample ID
+meta <- meta[order(meta$group, meta$`sample-id`), , drop = FALSE]
+
 sample_order <- meta$`sample-id`
 sample_order <- sample_order[sample_order %in% colnames(tab)]
 
-# Column Order
+# Reorder abundance table
 tab <- tab[, sample_order, drop = FALSE]
 
-# NA to 0
-tab[is.na(tab)] <- 0
+# =========================
+# 6. Sort families alphabetically
+# =========================
 
-# Deletion of 0
-tab <- tab[rowSums(tab) > 0, , drop = FALSE]
+tab <- tab[sort(rownames(tab)), , drop = FALSE]
 
-# Column Adnotation
-annotation_col <- meta[
-  match(colnames(tab), meta$`sample-id`),
-  "class",
-  drop = FALSE
-]
-rownames(annotation_col) <- colnames(tab)
+# =========================
+# 7. Column annotation
+# =========================
 
-# Log-transform, so the heatmap has better contrast.
+annotation_col <- data.frame(
+  Group = meta$group[match(colnames(tab), meta$`sample-id`)],
+  row.names = colnames(tab),
+  check.names = FALSE
+)
+
+# =========================
+# 8. Log transformation
+# =========================
+
 tab_log <- log10(as.matrix(tab) + 0.01)
 
-# SLAYING with colors (Serve only with the contrasting ones!!! Otherwise prepare to flop)
+# =========================
+# 9. Heatmap settings
+# =========================
+
 hm_cols <- colorRampPalette(c("#31079C", "white", "#C80946"))(100)
 
-# Symetric breaks
 max_val <- max(abs(tab_log))
 hm_breaks <- seq(-max_val, max_val, length.out = 101)
 
-# Heatmap appears in R window. Might be useless if on Windows - I had some issues on Linux with it.
+# =========================
+# 10. Preview heatmap
+# =========================
+
 pheatmap(
   tab_log,
-  cluster_rows = TRUE,
+  cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
   fontsize_row = 8,
   fontsize_col = 8,
+  cellwidth = 18,
   border_color = NA,
   color = hm_cols,
   breaks = hm_breaks,
   main = "Top 30 families (log-transformed relative abundance)"
 )
 
-# PNG
+# =========================
+# 11. Save PNG
+# =========================
+
 png(
   "06_Exports/family_per_sample_export/top30_family_heatmap-color.png",
   width = 1800,
-  height = 1400,
+  height = 1800,
   res = 200
 )
 
 pheatmap(
   tab_log,
-  cluster_rows = TRUE,
+  cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
   fontsize_row = 8,
   fontsize_col = 8,
+  cellwidth = 18,
   border_color = NA,
   color = hm_cols,
   breaks = hm_breaks,
@@ -136,23 +241,24 @@ pheatmap(
 
 dev.off()
 
-# PDF
+# =========================
+# 12. Save PDF
+# =========================
+
 pdf(
   "06_Exports/family_per_sample_export/top30_family_heatmap-color.pdf",
-  width = 12,
+  width = 9,
   height = 9
 )
-# If PNG did not save properly, this thingie down here will definitley save it.
-png("06_Exports/family_per_sample_export/top30_family_heatmap-color.png",
-    width = 1800, height = 1400, res = 200)
 
 pheatmap(
   tab_log,
-  cluster_rows = TRUE,
+  cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
   fontsize_row = 8,
   fontsize_col = 8,
+  cellwidth = 18,
   border_color = NA,
   color = hm_cols,
   breaks = hm_breaks,
@@ -160,4 +266,6 @@ pheatmap(
 )
 
 dev.off()
+
+
 
