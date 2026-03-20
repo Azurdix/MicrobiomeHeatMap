@@ -175,7 +175,7 @@ tab_agg <- tab_agg[rowSums(tab_agg) > 0, , drop = FALSE]
 tab_agg <- tab_agg[sort(rownames(tab_agg)), , drop = FALSE]
 
 # =========================
-# 6. Column annotation
+# 6. Column annotation and colors
 # =========================
 
 annotation_col <- data.frame(
@@ -183,6 +183,18 @@ annotation_col <- data.frame(
   row.names = colnames(tab_agg),
   check.names = FALSE
 )
+
+annotation_colors <- list(
+  Group = c(
+    "PTSD-EGGS" = "#FFAB5C",
+    "PTSD-SILK" = "#8DA3FC",
+    "PTSD-ENV"  = "#5FFC6F",
+    "PRD-EGGS"  = "#E66F00",
+    "PRD-SILK"  = "#345DFA",
+    "PRD-ENV"   = "#026B0C"
+  )
+)
+
 
 # =========================
 # 7. Log-transform
@@ -208,6 +220,7 @@ pheatmap(
   cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
   fontsize_row = 8,
   fontsize_col = 9,
   cellwidth = 18,
@@ -233,6 +246,7 @@ pheatmap(
   cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
   fontsize_row = 8,
   fontsize_col = 9,
   cellwidth = 18,
@@ -259,6 +273,7 @@ pheatmap(
   cluster_rows = FALSE,
   cluster_cols = FALSE,
   annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
   fontsize_row = 8,
   fontsize_col = 9,
   cellwidth = 18,
