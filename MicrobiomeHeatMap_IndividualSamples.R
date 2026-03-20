@@ -12,7 +12,7 @@
 # in the heatmap represents a single sample rather than a grouped mean profile.
 #
 # Final figure settings:
-# - bacterial families (rows) are sorted alphabetically
+# - bacterial families (rows) can be displayed either alphabetically or with row clustering
 # - samples (columns) are displayed in fixed biological group order:
 #     PTSD-EGGS, PTSD-SILK, PTSD-ENV, PRD-EGGS, PRD-SILK, PRD-ENV
 # - samples within each group are sorted alphabetically by sample ID
@@ -48,8 +48,9 @@
 # Notes:
 # - NA values are replaced with 0 before log-transformation.
 # - Symmetric color breaks are used for balanced visualization.
-# - Row clustering is disabled to preserve alphabetical family order.
-# - Column clustering is disabled to preserve predefined sample order.
+# - If row dendrogram is turned off, families remain in alphabetical order.
+# - If row dendrogram is turned on, families are reordered by clustering.
+# - If column dendrogram is turned on, the fixed sample order will be overridden.
 # =============================================================================================
 
 # Clean environment
@@ -169,6 +170,7 @@ tab <- tab[, sample_order, drop = FALSE]
 # 6. Sort families alphabetically
 # =========================
 
+# This order will only remain visible if row clustering is turned off.
 tab <- tab[sort(rownames(tab)), , drop = FALSE]
 
 # =========================
@@ -208,13 +210,27 @@ max_val <- max(abs(tab_log))
 hm_breaks <- seq(-max_val, max_val, length.out = 101)
 
 # =========================
+# 9A. Dendrogram settings
+# =========================
+
+# TRUE  = show dendrogram
+# FALSE = hide dendrogram
+
+show_row_dendrogram <- TRUE
+show_col_dendrogram <- FALSE
+
+# Recommended setup for your project:
+# show_row_dendrogram <- TRUE
+# show_col_dendrogram <- FALSE
+
+# =========================
 # 10. Preview heatmap
 # =========================
 
 pheatmap(
   tab_log,
-  cluster_rows = FALSE,
-  cluster_cols = FALSE,
+  cluster_rows = show_row_dendrogram,
+  cluster_cols = show_col_dendrogram,
   annotation_col = annotation_col,
   annotation_colors = annotation_colors,
   fontsize_row = 8,
@@ -232,15 +248,15 @@ pheatmap(
 
 png(
   "06_Exports/family_per_sample_export/top30_family_heatmap-color.png",
-  width = 1800,
+  width = 2300,
   height = 1800,
   res = 200
 )
 
 pheatmap(
   tab_log,
-  cluster_rows = FALSE,
-  cluster_cols = FALSE,
+  cluster_rows = show_row_dendrogram,
+  cluster_cols = show_col_dendrogram,
   annotation_col = annotation_col,
   annotation_colors = annotation_colors,
   fontsize_row = 8,
@@ -266,8 +282,8 @@ pdf(
 
 pheatmap(
   tab_log,
-  cluster_rows = FALSE,
-  cluster_cols = FALSE,
+  cluster_rows = show_row_dendrogram,
+  cluster_cols = show_col_dendrogram,
   annotation_col = annotation_col,
   annotation_colors = annotation_colors,
   fontsize_row = 8,
