@@ -1,10 +1,10 @@
-# =============================================================================================
-# Title: Aggregated Heatmaps of Core Microbiome - PRD / PTSD / Combined
+# ===========================================================================================================
+# Title: Heatmaps for Core Microbiome - PRD (Pardosa lugubris) + PTSD (Parasteatoda tepidariorum) + Combined
 # Author: Mateusz Glenszczyk
 # Email: mateusz.glenszczyk@gmail.com
 # Date: 2026-04-01
 # Project: PhD - Project Stage: Spider's Egg sac-associated Microbiome.
-# =============================================================================================
+# ===========================================================================================================
 #
 # Description:
 # This script generates aggregated heatmaps of the core microbiome in two spider species:
