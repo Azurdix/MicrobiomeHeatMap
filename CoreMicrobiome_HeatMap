@@ -1,0 +1,539 @@
+# =============================================================================================
+# Title: Aggregated Heatmaps of Core Microbiome - PRD / PTSD / Combined
+# Author: Mateusz Glenszczyk
+# Email: mateusz.glenszczyk@gmail.com
+# Date: 2026-04-01
+# Project: PhD - Project Stage: Spider's Egg sac-associated Microbiome.
+# =============================================================================================
+#
+# Description:
+# This script generates aggregated heatmaps of the core microbiome in two spider species:
+# PRD (Pardosa lugubris) and PTSD (Parasteatoda tepidariorum). The analysis includes
+# environmental, silk-associated, and egg-associated samples, and may be performed separately
+# for each species as well as on the combined dataset.
+#
+# The script is based on the feature table and taxonomy files exported from QIIME2.
+# ASV counts are aggregated to the selected taxonomic level (family or genus), and
+# core taxa are defined as those with more than 10 reads per sample and present in at
+# least 66% of samples within a given sample group.
+#
+# For each dataset subset, the script:
+# - loads metadata, feature table, and taxonomy,
+# - extracts family and genus annotations,
+# - identifies core taxa within each aggregated sample type,
+# - calculates mean relative abundances,
+# - selects the top 30 most abundant core taxa,
+# - generates log-transformed heatmaps based on aggregated relative abundance values,
+# - saves both graphical outputs and supplementary result tables.
+#
+# Additional filtering is applied to remove non-informative or ambiguous taxonomy labels,
+# including uncultured, unclassified, unknown, subgroup-like labels, chloroplasts,
+# mitochondria, metagenome-derived entries, and other poorly resolved taxa, in order
+# to improve the biological interpretability of the final heatmaps.
+#
+# This approach allows direct comparison of dominant core bacterial families or genera
+# across sample types within each species and between species in the combined analysis.
+# =============================================================================================
+
+rm(list = ls())
+
+suppressPackageStartupMessages({
+  library(readr)
+  library(dplyr)
+  library(tidyr)
+  library(stringr)
+  library(tibble)
+  library(pheatmap)
+  library(grid)
+})
+
+# ============================================================================================
+# SETTINGS
+# ============================================================================================
+
+BASE_DIR <- "/home/Azu/Pulpit/data_NGS"
+OUT_DIR  <- file.path(BASE_DIR, "Core Microbiome", "Heatmaps")
+dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+METADATA_FILE <- file.path(BASE_DIR, "01_Metadata", "metadata_plik.tsv")
+FEATURE_TABLE_FILE <- file.path(BASE_DIR, "06_Exports", "deseq2_input", "feature-table.tsv")
+TAXONOMY_FILE <- file.path(BASE_DIR, "06_Exports", "deseq2_input", "taxonomy_export", "taxonomy.tsv")
+
+top_n <- 30
+count_threshold <- 10
+prevalence_threshold <- 0.66
+pseudocount_percent <- 0.01
+
+SAMPLE_ID_COL <- "sample-id"
+SPECIES_COL   <- "group"
+TYPE_COL      <- "type"
+
+sample_type_levels_all <- c(
+  "PRD ENV",
+  "PRD SILK",
+  "PRD EGGS",
+  "PTSD ENV",
+  "PTSD SILK",
+  "PTSD EGGS"
+)
+
+sample_type_colors <- c(
+  "PRD ENV"   = "#A1D99B",
+  "PRD SILK"  = "#9ECAE1",
+  "PRD EGGS"  = "#FEE391",
+  "PTSD ENV"  = "#31A354",
+  "PTSD SILK" = "#3182BD",
+  "PTSD EGGS" = "#E6AB02"
+)
+
+heat_colors <- colorRampPalette(
+  c("#253494", "#2C7FB8", "#41B6C4", "#A1DAB4", "#FFFFBF", "#FDAE61", "#D7191C")
+)(100)
+
+legend_percent_values <- c(0.01, 0.10, 1.00, 10.00)
+legend_breaks <- log10(legend_percent_values)
+
+scale_min <- log10(0.01)
+scale_max <- log10(10.00)
+scale_breaks <- seq(scale_min, scale_max, length.out = 101)
+
+# ============================================================================================
+# FUNCTIONS
+# ============================================================================================
+
+extract_family <- function(tax) {
+  fam <- str_match(tax, "f__([^;]+)")[, 2]
+  fam[is.na(fam) | fam == ""] <- "Unclassified_family"
+  fam
+}
+
+extract_genus <- function(tax) {
+  gen <- str_match(tax, "g__([^;]+)")[, 2]
+  gen[is.na(gen) | gen == ""] <- "Unclassified_genus"
+  gen
+}
+
+is_unwanted_taxon <- function(x) {
+  if (is.na(x) || trimws(x) == "") return(TRUE)
+  
+  x2 <- tolower(trimws(x))
+  
+  patterns <- c(
+    "^_+$",
+    "uncultured",
+    "unclassified",
+    "unknown",
+    "incertae[ _-]?sedis",
+    "subgroup",
+    "soil[ _-]?group",
+    "terrestrial[ _-]?group",
+    "chloroplast",
+    "mitochondria",
+    "norank",
+    "metagenome",
+    "environmental",
+    "candidate",
+    "ambiguous",
+    "bacteriap[0-9]*",
+    "unknown_family",
+    "unknown_genus",
+    "^[0-9]+-[0-9]+$",
+    "^[a-z0-9]+-[a-z0-9-]+$"
+  )
+  
+  any(sapply(patterns, function(p) grepl(p, x2, perl = TRUE)))
+}
+
+get_sample_group <- function(species_value, type_value) {
+  paste(species_value, type_value)
+}
+
+draw_heatmap <- function(mat, annotation_col, gaps_col, main_title) {
+  pheatmap(
+    mat,
+    scale = "none",
+    cluster_rows = TRUE,
+    cluster_cols = FALSE,
+    annotation_col = annotation_col,
+    annotation_colors = list("Sample Type" = sample_type_colors),
+    gaps_col = gaps_col,
+    show_colnames = TRUE,
+    show_rownames = TRUE,
+    fontsize_row = 10,
+    fontsize_col = 11,
+    cellwidth = 28,
+    cellheight = 16,
+    border_color = "grey85",
+    treeheight_row = 90,
+    treeheight_col = 0,
+    color = heat_colors,
+    breaks = scale_breaks,
+    legend_breaks = legend_breaks,
+    legend_labels = sprintf("%.2f", legend_percent_values),
+    main = main_title,
+    angle_col = 45,
+    silent = TRUE
+  )
+}
+
+save_heatmap_files <- function(obj, title_text, out_prefix, pdf_width = 12, pdf_height = 11) {
+  hm <- draw_heatmap(
+    mat = obj$mat,
+    annotation_col = obj$annotation_col,
+    gaps_col = obj$gaps_col,
+    main_title = title_text
+  )
+  
+  legend_id <- which(hm$gtable$layout$name == "legend")
+  if (length(legend_id) > 0) {
+    legend_col <- hm$gtable$layout$l[legend_id]
+    hm$gtable$widths[legend_col] <- unit(2.4, "cm")
+  }
+  
+  ann_id <- which(hm$gtable$layout$name %in% c("col_annotation", "annotation_col"))
+  if (length(ann_id) > 0) {
+    for (i in ann_id) {
+      grob <- hm$gtable$grobs[[i]]
+      
+      if (!is.null(grob$children)) {
+        for (j in seq_along(grob$children)) {
+          child <- grob$children[[j]]
+          if (!is.null(child$gp)) {
+            child$gp$col <- NA
+            grob$children[[j]] <- child
+          }
+        }
+      }
+      
+      if (!is.null(grob$gp)) {
+        grob$gp$col <- NA
+      }
+      
+      hm$gtable$grobs[[i]] <- grob
+    }
+  }
+  
+  pdf(paste0(out_prefix, ".pdf"), width = pdf_width, height = pdf_height)
+  grid.newpage()
+  grid.draw(hm$gtable)
+  dev.off()
+  
+  png(paste0(out_prefix, ".png"), width = 4000, height = 3300, res = 300)
+  grid.newpage()
+  grid.draw(hm$gtable)
+  dev.off()
+}
+
+prepare_core_heatmap_subset <- function(
+    feature_long,
+    tax_level = c("family", "genus"),
+    selected_species = c("PRD", "PTSD"),
+    selected_types = c("ENV", "SILK", "EGGS"),
+    top_n = 30,
+    count_threshold = 10,
+    prevalence_threshold = 0.66,
+    pseudocount_percent = 0.01
+) {
+  tax_level <- match.arg(tax_level)
+  
+  tax_col <- if (tax_level == "family") "family" else "genus"
+  
+  count_long <- feature_long %>%
+    filter(.data[[SPECIES_COL]] %in% selected_species,
+           .data[[TYPE_COL]] %in% selected_types) %>%
+    group_by(.data[[SAMPLE_ID_COL]], .data[[SPECIES_COL]], .data[[TYPE_COL]], .data[[tax_col]]) %>%
+    summarise(count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+    rename(Taxon = all_of(tax_col))
+  
+  count_long <- count_long %>%
+    filter(!is.na(Taxon), Taxon != "") %>%
+    filter(!vapply(Taxon, is_unwanted_taxon, logical(1)))
+  
+  if (nrow(count_long) == 0) {
+    stop("No taxa left after filtering for tax_level = ", tax_level)
+  }
+  
+  count_long <- count_long %>%
+    mutate(SampleType = get_sample_group(.data[[SPECIES_COL]], .data[[TYPE_COL]]))
+  
+  selected_sample_types <- unique(count_long$SampleType)
+  selected_sample_types <- sample_type_levels_all[sample_type_levels_all %in% selected_sample_types]
+  
+  core_by_group <- count_long %>%
+    group_by(SampleType, Taxon) %>%
+    summarise(
+      n_samples = n_distinct(.data[[SAMPLE_ID_COL]]),
+      n_present = sum(count > count_threshold, na.rm = TRUE),
+      min_required = ceiling(prevalence_threshold * n_samples),
+      is_core = n_present >= min_required,
+      .groups = "drop"
+    ) %>%
+    filter(is_core)
+  
+  core_taxa_union <- sort(unique(core_by_group$Taxon))
+  
+  if (length(core_taxa_union) == 0) {
+    stop("No core taxa found for tax_level = ", tax_level, " in subset.")
+  }
+  
+  rel_long <- count_long %>%
+    group_by(.data[[SAMPLE_ID_COL]]) %>%
+    mutate(rel_abundance = count / sum(count)) %>%
+    ungroup() %>%
+    mutate(
+      rel_abundance = ifelse(is.na(rel_abundance), 0, rel_abundance),
+      SampleType = get_sample_group(.data[[SPECIES_COL]], .data[[TYPE_COL]])
+    )
+  
+  rel_core <- rel_long %>%
+    filter(Taxon %in% core_taxa_union)
+  
+  rel_grouped <- rel_core %>%
+    group_by(Taxon, SampleType) %>%
+    summarise(mean_rel = mean(rel_abundance, na.rm = TRUE), .groups = "drop") %>%
+    mutate(SampleType = factor(SampleType, levels = selected_sample_types)) %>%
+    tidyr::complete(Taxon, SampleType, fill = list(mean_rel = 0)) %>%
+    mutate(SampleType = as.character(SampleType))
+  
+  rel_wide <- rel_grouped %>%
+    pivot_wider(names_from = SampleType, values_from = mean_rel)
+  
+  rel_wide <- as.data.frame(rel_wide)
+  rownames(rel_wide) <- rel_wide$Taxon
+  rel_wide$Taxon <- NULL
+  
+  rel_wide <- rel_wide[, selected_sample_types, drop = FALSE]
+  
+  mean_abund <- rowMeans(rel_wide, na.rm = TRUE)
+  rel_wide <- rel_wide[order(mean_abund, decreasing = TRUE), , drop = FALSE]
+  rel_wide <- rel_wide[seq_len(min(top_n, nrow(rel_wide))), , drop = FALSE]
+  
+  rel_percent <- rel_wide * 100
+  rel_percent_out <- rel_percent
+  
+  rel_percent_plot <- rel_percent
+  rel_percent_plot[rel_percent_plot < pseudocount_percent] <- pseudocount_percent
+  rel_plot_log <- log10(rel_percent_plot)
+  
+  annotation_col <- data.frame(
+    "Sample Type" = factor(selected_sample_types, levels = selected_sample_types),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  rownames(annotation_col) <- selected_sample_types
+  
+  gaps_col <- cumsum(rep(1, length(selected_sample_types)))
+  gaps_col <- gaps_col[-length(gaps_col)]
+  
+  list(
+    mat = rel_plot_log,
+    rel_percent = rel_percent_out,
+    annotation_col = annotation_col,
+    gaps_col = gaps_col,
+    core_taxa_union = core_taxa_union,
+    core_by_group = core_by_group
+  )
+}
+
+save_object_tables <- function(obj, prefix, out_dir) {
+  write.table(
+    obj$rel_percent,
+    file = file.path(out_dir, paste0(prefix, "_heatmap_input_percent_aggregated.tsv")),
+    sep = "\t",
+    quote = FALSE,
+    col.names = NA
+  )
+  
+  write.table(
+    obj$core_by_group,
+    file = file.path(out_dir, paste0(prefix, "_core_taxa_by_group.tsv")),
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE
+  )
+  
+  write.table(
+    data.frame(Taxon = obj$core_taxa_union),
+    file = file.path(out_dir, paste0(prefix, "_core_taxa_union.tsv")),
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE
+  )
+}
+
+# ============================================================================================
+# LOAD INPUT
+# ============================================================================================
+
+metadata <- read_tsv(METADATA_FILE, show_col_types = FALSE) %>%
+  mutate(across(all_of(c(SAMPLE_ID_COL, SPECIES_COL, TYPE_COL)), as.character))
+
+feature_table <- read_tsv(
+  FEATURE_TABLE_FILE,
+  skip = 1,
+  show_col_types = FALSE
+)
+colnames(feature_table)[1] <- "FeatureID"
+
+taxonomy <- read_tsv(TAXONOMY_FILE, show_col_types = FALSE)
+colnames(taxonomy)[1] <- "FeatureID"
+
+taxonomy_col <- colnames(taxonomy)[2]
+
+taxonomy <- taxonomy %>%
+  mutate(
+    taxonomy_string = .data[[taxonomy_col]],
+    family = extract_family(taxonomy_string),
+    genus  = extract_genus(taxonomy_string)
+  ) %>%
+  select(FeatureID, family, genus)
+
+common_samples <- intersect(colnames(feature_table)[-1], metadata[[SAMPLE_ID_COL]])
+
+feature_table <- feature_table %>%
+  select(FeatureID, all_of(common_samples))
+
+metadata <- metadata %>%
+  filter(.data[[SAMPLE_ID_COL]] %in% common_samples)
+
+feature_long <- feature_table %>%
+  pivot_longer(
+    cols = -FeatureID,
+    names_to = SAMPLE_ID_COL,
+    values_to = "count"
+  ) %>%
+  mutate(count = as.numeric(count)) %>%
+  left_join(metadata, by = SAMPLE_ID_COL) %>%
+  left_join(taxonomy, by = "FeatureID")
+
+# ============================================================================================
+# BUILD OBJECTS
+# ============================================================================================
+
+family_prd <- prepare_core_heatmap_subset(
+  feature_long = feature_long,
+  tax_level = "family",
+  selected_species = "PRD",
+  selected_types = c("ENV", "SILK", "EGGS"),
+  top_n = top_n,
+  count_threshold = count_threshold,
+  prevalence_threshold = prevalence_threshold,
+  pseudocount_percent = pseudocount_percent
+)
+
+family_ptsd <- prepare_core_heatmap_subset(
+  feature_long = feature_long,
+  tax_level = "family",
+  selected_species = "PTSD",
+  selected_types = c("ENV", "SILK", "EGGS"),
+  top_n = top_n,
+  count_threshold = count_threshold,
+  prevalence_threshold = prevalence_threshold,
+  pseudocount_percent = pseudocount_percent
+)
+
+family_combined <- prepare_core_heatmap_subset(
+  feature_long = feature_long,
+  tax_level = "family",
+  selected_species = c("PRD", "PTSD"),
+  selected_types = c("ENV", "SILK", "EGGS"),
+  top_n = top_n,
+  count_threshold = count_threshold,
+  prevalence_threshold = prevalence_threshold,
+  pseudocount_percent = pseudocount_percent
+)
+
+genus_prd <- prepare_core_heatmap_subset(
+  feature_long = feature_long,
+  tax_level = "genus",
+  selected_species = "PRD",
+  selected_types = c("ENV", "SILK", "EGGS"),
+  top_n = top_n,
+  count_threshold = count_threshold,
+  prevalence_threshold = prevalence_threshold,
+  pseudocount_percent = pseudocount_percent
+)
+
+genus_ptsd <- prepare_core_heatmap_subset(
+  feature_long = feature_long,
+  tax_level = "genus",
+  selected_species = "PTSD",
+  selected_types = c("ENV", "SILK", "EGGS"),
+  top_n = top_n,
+  count_threshold = count_threshold,
+  prevalence_threshold = prevalence_threshold,
+  pseudocount_percent = pseudocount_percent
+)
+
+genus_combined <- prepare_core_heatmap_subset(
+  feature_long = feature_long,
+  tax_level = "genus",
+  selected_species = c("PRD", "PTSD"),
+  selected_types = c("ENV", "SILK", "EGGS"),
+  top_n = top_n,
+  count_threshold = count_threshold,
+  prevalence_threshold = prevalence_threshold,
+  pseudocount_percent = pseudocount_percent
+)
+
+# ============================================================================================
+# SAVE TABLES
+# ============================================================================================
+
+save_object_tables(family_prd, "family_PRD", OUT_DIR)
+save_object_tables(family_ptsd, "family_PTSD", OUT_DIR)
+save_object_tables(family_combined, "family_combined", OUT_DIR)
+
+save_object_tables(genus_prd, "genus_PRD", OUT_DIR)
+save_object_tables(genus_ptsd, "genus_PTSD", OUT_DIR)
+save_object_tables(genus_combined, "genus_combined", OUT_DIR)
+
+# ============================================================================================
+# SAVE HEATMAPS
+# ============================================================================================
+
+save_heatmap_files(
+  family_prd,
+  "Top 30 core bacterial families across PRD aggregated sample types",
+  file.path(OUT_DIR, "FINAL_family_core_heatmap_PRD_aggregated"),
+  pdf_width = 9, pdf_height = 11
+)
+
+save_heatmap_files(
+  family_ptsd,
+  "Top 30 core bacterial families across PTSD aggregated sample types",
+  file.path(OUT_DIR, "FINAL_family_core_heatmap_PTSD_aggregated"),
+  pdf_width = 9, pdf_height = 11
+)
+
+save_heatmap_files(
+  family_combined,
+  "Top 30 core bacterial families across aggregated sample types",
+  file.path(OUT_DIR, "FINAL_family_core_heatmap_combined_aggregated"),
+  pdf_width = 12, pdf_height = 11
+)
+
+save_heatmap_files(
+  genus_prd,
+  "Top 30 core bacterial genera across PRD aggregated sample types",
+  file.path(OUT_DIR, "FINAL_genus_core_heatmap_PRD_aggregated"),
+  pdf_width = 9, pdf_height = 11
+)
+
+save_heatmap_files(
+  genus_ptsd,
+  "Top 30 core bacterial genera across PTSD aggregated sample types",
+  file.path(OUT_DIR, "FINAL_genus_core_heatmap_PTSD_aggregated"),
+  pdf_width = 9, pdf_height = 11
+)
+
+save_heatmap_files(
+  genus_combined,
+  "Top 30 core bacterial genera across aggregated sample types",
+  file.path(OUT_DIR, "FINAL_genus_core_heatmap_combined_aggregated"),
+  pdf_width = 12, pdf_height = 11
+)
+
+cat("\nSaved files:\n")
+print(list.files(OUT_DIR, pattern = "FINAL|core_taxa|heatmap_input", full.names = FALSE))
+
