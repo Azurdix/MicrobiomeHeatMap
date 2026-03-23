@@ -1,4 +1,4 @@
-# Microbiome Heatmaps
+# Microbiome Heatmaps - PRD / PTSD / Compartments + Core Microbiome
 
 Welcome!
 
